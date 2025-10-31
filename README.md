@@ -171,3 +171,77 @@ Use o `logcat` para monitorar a funcionalidade.
     ```
 
     A cada comando `adb`, uma mensagem de "Habilitando..." ou "Desabilitando..." deve aparecer.
+
+    public void onRotationProposal(int rotation, boolean isValid) {
+        // ... (as primeiras verificações 'isUserSetupComplete', 'OEM_DISALLOW_ROTATION_IN_SUW'
+        //      e 'mRotationButton.acceptRotationProposal()' continuam iguais)
+
+        int windowRotation = mWindowRotationProvider.get();
+
+        // ... (a verificação 'mHomeRotationEnabled' continua igual)
+
+        // Se a proposta não for válida, esconde o botão (comportamento original)
+        if (!isValid) {
+            setRotateSuggestionButtonState(false /* visible */);
+            return;
+        }
+
+        // Se a rotação já for a sugerida, esconde o botão (comportamento original)
+        if (rotation == windowRotation) {
+            mMainThreadHandler.removeCallbacks(mRemoveRotationProposal);
+            setRotateSuggestionButtonState(false /* visible */);
+            return;
+        }
+
+        // Armazena a sugestão (comportamento original)
+        Log.i(TAG, "onRotationProposal(rotation=" + rotation + ")");
+        mLastRotationSuggestion = rotation; // Lembra a rotação
+        
+        // ... (a lógica original para 'mIconResId' e 'mRotationButton.updateIcon'
+        //      pode continuar aqui, linhas 514-519)
+        final boolean rotationCCW = Utilities.isRotationAnimationCCW(windowRotation, rotation);
+        if (windowRotation == Surface.ROTATION_0 || windowRotation == Surface.ROTATION_180) {
+            mIconResId = rotationCCW ? mIconCcwStart0ResId : mIconCwStart0ResId;
+        } else { // 90 or 270
+            mIconResId = rotationCCW ? mIconCcwStart90ResId : mIconCwStart90ResId;
+        }
+        mRotationButton.updateIcon(mLightIconColor, mDarkIconColor);
+
+
+        // --- INÍCIO DA MODIFICAÇÃO ---
+        // Aqui checamos a sua flag customizada
+        if (mMinhaFlagDeAutoRotacao) {
+            Log.i(TAG, "mMinhaFlagDeAutoRotacao=true. Rotacionando automaticamente.");
+            
+            // Dispara a mesma lógica que o clique do botão faria
+            setRotationLockedAtAngle(
+                    RotationPolicyUtil.isRotationLocked(mContext), mLastRotationSuggestion,
+                    /* caller= */ "RotationButtonController#onRotationProposal(AutoRotate)");
+            
+            // Loga o evento como se tivesse sido aceito
+            mUiEventLogger.log(RotationButtonEvent.ROTATION_SUGGESTION_ACCEPTED);
+            incrementNumAcceptedRotationSuggestionsIfNeeded();
+            
+            // Garante que o botão não apareça, pois já rotacionamos
+            setRotateSuggestionButtonState(false /* visible */);
+            
+            // Importante: saia da função aqui para não executar o código abaixo
+            return; 
+        }
+        // --- FIM DA MODIFICAÇÃO ---
+
+
+        // Se a flag for 'false', o código original abaixo será executado,
+        // mostrando o botão de sugestão normalmente.
+        if (canShowRotationButton()) {
+            // The navbar is visible / it's in visual immersive mode, so show the icon right away
+            showAndLogRotationSuggestion();
+        } else {
+            // If the navbar isn't shown, flag the rotate icon to be shown should the navbar become
+            // visible given some time limit.
+            mPendingRotationSuggestion = true;
+            mMainThreadHandler.removeCallbacks(mCancelPendingRotationProposal);
+            mMainThreadHandler.postDelayed(mCancelPendingRotationProposal,
+                    NAVBAR_HIDDEN_PENDING_ICON_TIMEOUT_MS);
+        }
+    }
