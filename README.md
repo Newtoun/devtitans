@@ -209,23 +209,15 @@ Use o `logcat` para monitorar a funcionalidade.
 
 
         // --- INÍCIO DA MODIFICAÇÃO ---
-        // Aqui checamos a sua flag customizada
-        if (mMinhaFlagDeAutoRotacao) {
+        if (true) {
             Log.i(TAG, "mMinhaFlagDeAutoRotacao=true. Rotacionando automaticamente.");
             
-            // Dispara a mesma lógica que o clique do botão faria
-            setRotationLockedAtAngle(
-                    RotationPolicyUtil.isRotationLocked(mContext), mLastRotationSuggestion,
-                    /* caller= */ "RotationButtonController#onRotationProposal(AutoRotate)");
+            setRotationLockedAtAngle(1) ;
             
             // Loga o evento como se tivesse sido aceito
             mUiEventLogger.log(RotationButtonEvent.ROTATION_SUGGESTION_ACCEPTED);
-            incrementNumAcceptedRotationSuggestionsIfNeeded();
             
-            // Garante que o botão não apareça, pois já rotacionamos
-            setRotateSuggestionButtonState(false /* visible */);
             
-            // Importante: saia da função aqui para não executar o código abaixo
             return; 
         }
         // --- FIM DA MODIFICAÇÃO ---
