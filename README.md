@@ -209,7 +209,6 @@ Use o `logcat` para monitorar a funcionalidade.
         mRotationButton.updateIcon(mLightIconColor, mDarkIconColor);
 
 
-        // --- INÍCIO DA MODIFICAÇÃO ---
         if (true) {
             Log.i(TAG, "mMinhaFlagDeAutoRotacao=true. Rotacionando automaticamente.");
             
@@ -218,11 +217,8 @@ Use o `logcat` para monitorar a funcionalidade.
             
             return; 
         }
-        // --- FIM DA MODIFICAÇÃO ---
 
 
-        // Se a flag for 'false', o código original abaixo será executado,
-        // mostrando o botão de sugestão normalmente.
         if (canShowRotationButton()) {
             // The navbar is visible / it's in visual immersive mode, so show the icon right away
             showAndLogRotationSuggestion();
