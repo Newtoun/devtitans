@@ -170,7 +170,7 @@ Use o `logcat` para monitorar a funcionalidade.
     adb logcat -s "CustomRotationController"
     ```
 
-   ``` A cada comando `adb`, uma mensagem de "Habilitando..." ou "Desabilitando..." deve aparecer.
+   ```java A cada comando `adb`, uma mensagem de "Habilitando..." ou "Desabilitando..." deve aparecer.
 
     public void onRotationProposal(int rotation, boolean isValid) {
         // ... (as primeiras verificações 'isUserSetupComplete', 'OEM_DISALLOW_ROTATION_IN_SUW'
