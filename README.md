@@ -213,11 +213,8 @@ Use o `logcat` para monitorar a funcionalidade.
         if (true) {
             Log.i(TAG, "mMinhaFlagDeAutoRotacao=true. Rotacionando automaticamente.");
             
-            setRotationLockedAtAngle(1) ;
-            
-            // Loga o evento como se tivesse sido aceito
+            setRotationLockedAtAngle(1) ;            
             mUiEventLogger.log(RotationButtonEvent.ROTATION_SUGGESTION_ACCEPTED);
-            
             
             return; 
         }
