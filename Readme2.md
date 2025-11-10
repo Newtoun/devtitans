@@ -162,3 +162,162 @@ public class RotationButtonController {
 1.  **Desacoplamento:** `SystemUI` não precisa saber *quem* ou *por que* a flag mudou. Ele apenas reage à mudança.
 2.  **Eficiência:** `onRotationProposal` (que é chamado frequentemente) apenas lê uma variável booleana local (`mAutoAcceptSuggestion`), o que é instantâneo. A leitura do banco de dados (que é mais lenta) só acontece quando o valor realmente muda, graças ao `ContentObserver`.
 3.  **Robustez:** Este é o padrão do AOSP para comunicação de estado entre o `SystemServer` e outros componentes do sistema, como o `SystemUI`.
+
+Claro. Esta é uma arquitetura comum para permitir que o `SystemServer` notifique outros aplicativos (ou o próprio `SystemUI`) sobre eventos específicos de reprodução de mídia.
+
+Aqui está a documentação em markdown que detalha como modificar o `MediaSessionService` para disparar um broadcast `Intent` quando o estado de reprodução de um pacote específico (genérico) é alterado.
+
+-----
+
+## AOSP: Disparar Intent na Mudança de Estado de Reprodução de Pacote
+
+Este documento descreve como modificar o `MediaSessionService` para monitorar mudanças no estado de reprodução (como play, pause, etc.) de um pacote de aplicativo específico e, em resposta, disparar um broadcast `Intent` para todo o sistema.
+
+### 1\. Objetivo
+
+O objetivo é adicionar um "gatilho" (trigger) dentro do `MediaSessionService` que:
+
+1.  Identifica quando uma sessão de mídia pertence a um pacote-alvo (ex: `"com.example.generic"`).
+2.  Detecta qualquer mudança em seu estado de reprodução (via `onSessionPlaybackStateChanged`).
+3.  Envia uma `Intent` de broadcast com uma ação customizada (ex: `com.meu.device.ACTION_GENERIC_PLAYBACK_STATE_CHANGED`), contendo detalhes sobre a mudança de estado.
+
+### 2\. Estratégia de Implementação
+
+1.  **Definir Constantes:** Adicionar constantes de classe em `MediaSessionService.java` para o nome do pacote-alvo e a ação da `Intent` a ser disparada.
+2.  **Adicionar Imports:** Garantir que `android.content.Intent`, `android.os.UserHandle`, e `android.os.Binder` estejam importados.
+3.  **Modificar `onSessionPlaybackStateChanged`:** Inserir a lógica de verificação de pacote e o disparo da `Intent` dentro deste método. A `Intent` será enviada usando `mContext.sendBroadcastAsUser` para garantir que ela seja entregue no perfil de usuário correto.
+
+### 3\. Modificações no Código-Fonte
+
+**Arquivo:** `frameworks/base/services/media/java/com/android/server/media/MediaSessionService.java`
+
+#### Passo 1: Adicionar Imports
+
+Certifique-se de que os seguintes `imports` estão presentes no início do arquivo:
+
+```java
+// ...
+import android.content.Context;
+import android.content.Intent; // <<< ADICIONAR
+import android.content.IntentFilter;
+// ...
+import android.os.Binder; // <<< ADICIONAR
+import android.os.Bundle;
+import android.os.Handler;
+// ...
+import android.os.UserHandle; // <<< ADICIONAR
+import android.os.UserManager;
+// ...
+```
+
+#### Passo 2: Definir Constantes de Classe
+
+Adicione estas constantes perto das outras (logo após a definição de `TAG` e `DEBUG`):
+
+```java
+public class MediaSessionService extends SystemService implements Monitor {
+    private static final String TAG = "MediaSessionService";
+    static final boolean DEBUG = Log.isLoggable(TAG, Log.DEBUG);
+    // ...
+
+    // --- INÍCIO DA MODIFICAÇÃO ---
+    // 1. Defina o nome do pacote-alvo que você deseja monitorar
+    private static final String TARGET_PACKAGE_NAME = "com.example.generic"; // Mude para o seu pacote
+
+    // 2. Defina a ação da Intent que será disparada
+    private static final String ACTION_TARGET_PLAYBACK_STATE_CHANGED = 
+            "com.meu.device.ACTION_GENERIC_PLAYBACK_STATE_CHANGED";
+    // --- FIM DA MODIFICAÇÃO ---
+
+    private static final int WAKELOCK_TIMEOUT = 5000;
+    // ...
+```
+
+#### Passo 3: Modificar o Método `onSessionPlaybackStateChanged`
+
+Localize o método `onSessionPlaybackStateChanged` e adicione o novo bloco de código no final do bloco `synchronized (mLock)`.
+
+```java
+    void onSessionPlaybackStateChanged(
+            MediaSessionRecordImpl record,
+            boolean shouldUpdatePriority,
+            @Nullable PlaybackState playbackState) {
+        synchronized (mLock) {
+            FullUserRecord user = getFullUserRecordLocked(record.getUserId());
+            if (user == null || !user.mPriorityStack.contains(record)) {
+                Log.d(TAG, "Unknown session changed playback state. Ignoring.");
+                return;
+            }
+            user.mPriorityStack.onPlaybackStateChanged(record, shouldUpdatePriority);
+            boolean isUserEngaged = isUserEngaged(record, playbackState);
+            Log.d(
+                    TAG,
+                    "onSessionPlaybackStateChanged:"
+                            + " record="
+                            + record
+                            + " playbackState="
+                            + playbackState);
+            reportMediaInteractionEvent(record, isUserEngaged);
+
+            // --- INÍCIO DA MODIFICAÇÃO ---
+
+            // 3. Verificar se o pacote da sessão é o nosso pacote-alvo
+            if (TARGET_PACKAGE_NAME.equals(record.getPackageName())) {
+                Log.i(TAG, "Pacote-alvo (" + TARGET_PACKAGE_NAME + ") mudou o estado. Disparando Intent.");
+
+                // 4. Criar a Intent
+                Intent intent = new Intent(ACTION_TARGET_PLAYBACK_STATE_CHANGED);
+                intent.putExtra("packageName", record.getPackageName());
+                intent.putExtra("isUserEngaged", isUserEngaged); // Envia o estado (true = tocando, false = pausado/parado)
+                if (playbackState != null) {
+                    intent.putExtra("playbackState", playbackState.getState()); // Envia o estado numérico (ex: 3 = PLAYING)
+                }
+                // Adicionar flags para garantir que receptores em background recebam
+                intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND);
+
+                // 5. Enviar o broadcast dentro do perfil de usuário da sessão
+                //    (Necessário limpar a identidade da chamada, pois estamos no SystemServer)
+                final long token = Binder.clearCallingIdentity();
+                try {
+                    mContext.sendBroadcastAsUser(intent, UserHandle.of(record.getUserId()));
+                } finally {
+                    Binder.restoreCallingIdentity(token);
+                }
+            }
+            // --- FIM DA MODIFICAÇÃO ---
+        }
+    }
+```
+
+### 4\. Como Receber o Broadcast
+
+Qualquer outro aplicativo (ou componente do sistema) agora pode registrar um `BroadcastReceiver` para "ouvir" esta `Intent`.
+
+**Exemplo (AndroidManifest.xml de outro app):**
+
+```xml
+<receiver android:name=".MyPlaybackStateReceiver"
+          android:exported="true">
+    <intent-filter>
+        <action android:name="com.meu.device.ACTION_GENERIC_PLAYBACK_STATE_CHANGED" />
+    </intent-filter>
+</receiver>
+```
+
+**Exemplo (MyPlaybackStateReceiver.java):**
+
+```java
+public class MyPlaybackStateReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        if ("com.meu.device.ACTION_GENERIC_PLAYBACK_STATE_CHANGED".equals(intent.getAction())) {
+            String packageName = intent.getStringExtra("packageName");
+            boolean isPlaying = intent.getBooleanExtra("isUserEngaged", false);
+            int state = intent.getIntExtra("playbackState", -1);
+
+            // Agora você pode agir com base nessa informação
+            // (ex: disparar a sua lógica de auto-rotação)
+        }
+    }
+}
+```
